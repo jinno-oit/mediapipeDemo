@@ -28,18 +28,23 @@ class MediapipeHands(MediapipeClass):
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_tracking_confidence)
 
-    def drawHand(self, img, hand):
-        if hand.hand_landmarks:
+    def drawHand(self, img, hand_landmarks, hand_id):
+        if hand_landmarks and len(hand_landmarks)>hand_id:
             self.mp_drawing.draw_landmarks(
                 img,
-                hand.hand_landmarks,
+                hand_landmarks[hand_id],
                 self.mp_hands.HAND_CONNECTIONS,
                 self.mp_drawing_styles.get_default_hand_landmarks_style(),
                 self.mp_drawing_styles.get_default_hand_connections_style())
 
+    def drawHands(self, img, hand):
+        if hand.hand_landmarks:
+            for i in range(len(hand.hand_landmarks)):
+                self.drawHand(img, hand.hand_landmarks, i)
+
     def drawHandAll(self, img, hands):
-        self.drawHand(img, hands.Right)
-        self.drawHand(img, hands.Left)
+        self.drawHands(img, hands.Right)
+        self.drawHands(img, hands.Left)
 
     def detectHands(self, img_input):
         img = img_input.copy()
@@ -53,11 +58,11 @@ class MediapipeHands(MediapipeClass):
             for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                 # https://google.github.io/mediapipe/images/mobile/hand_landmarks.png
                 if handedness.classification[0].label == 'Left':
-                    self.hands_data.Left.hand_landmarks = hand_landmarks
-                    self.hands_data.Left.landmark = self.changeXYZ(hand_landmarks.landmark, width, height)
+                    self.hands_data.Left.hand_landmarks.append(hand_landmarks)
+                    self.hands_data.Left.landmark.append(self.changeXYZ(hand_landmarks.landmark, width, height))
                 if handedness.classification[0].label == 'Right':
-                    self.hands_data.Right.hand_landmarks = hand_landmarks
-                    self.hands_data.Right.landmark = self.changeXYZ(hand_landmarks.landmark, width, height)
+                    self.hands_data.Right.hand_landmarks.append(hand_landmarks)
+                    self.hands_data.Right.landmark.append(self.changeXYZ(hand_landmarks.landmark, width, height))
         return self.hands_data
 
 
@@ -184,11 +189,11 @@ class HandsData():
 class HandData(Point3D):
     def __init__(self, handedness):
         self.handedness = handedness
-        self.hand_landmarks = None
-        self.landmark = None
+        self.hand_landmarks = []
+        self.landmark = []
 
-    def judgeOpen(self, finger_id):
-        if self.landmark is None:
+    def judgeOpen(self, hand_id=0, finger_id='index'):
+        if self.landmark is None or len(self.landmark) <= hand_id:
             return None
         th_angle = 140
         if finger_id == 'thumb':
@@ -202,8 +207,8 @@ class HandData(Point3D):
             ind = [13, 14, 15]
         elif finger_id == 'pinky':
             ind = [17, 18, 19]
-        vec1 = self.landmark[ind[0]] - self.landmark[ind[1]]
-        vec2 = self.landmark[ind[2]] - self.landmark[ind[1]]
+        vec1 = self.landmark[hand_id][ind[0]] - self.landmark[hand_id][ind[1]]
+        vec2 = self.landmark[hand_id][ind[2]] - self.landmark[hand_id][ind[1]]
         if self.calcAngle(vec1, vec2) > th_angle:
             # print(self.handedness+': '+finger_id+' finger is opened.')
             return True
@@ -211,20 +216,20 @@ class HandData(Point3D):
             # print(self.handedness+': '+finger_id+' finger is bended.')
             return False
 
-    def judgeAll(self):
-        if self.landmark is None:
+    def judgeAll(self, hand_id=0):
+        if self.landmark is None or len(self.landmark) <= hand_id:
             return
-        thumb = 'o' if self.judgeOpen('thumb') else 'x'
-        index = 'o' if self.judgeOpen('index') else 'x'
-        middle = 'o' if self.judgeOpen('middle') else 'x'
-        ring = 'o' if self.judgeOpen('ring') else 'x'
-        pinky = 'o' if self.judgeOpen('pinky') else 'x'
+        thumb = 'o' if self.judgeOpen(hand_id, 'thumb') else 'x'
+        index = 'o' if self.judgeOpen(hand_id, 'index') else 'x'
+        middle = 'o' if self.judgeOpen(hand_id, 'middle') else 'x'
+        ring = 'o' if self.judgeOpen(hand_id, 'ring') else 'x'
+        pinky = 'o' if self.judgeOpen(hand_id, 'pinky') else 'x'
         print(thumb, '|', index, middle, ring, pinky)
 
-    def getPoint(self, point_id):
-        if self.landmark is None:
+    def getPoint(self, hand_id=0, point_id=8):
+        if self.landmark is None or len(self.landmark) <= hand_id:
             return
-        return self.landmark[point_id]
+        return self.landmark[hand_id][point_id]
 
 
 class PoseData(Point3D):
@@ -256,23 +261,32 @@ class FaceMeshData(Point3D):
 
 def testHands():
     cap = cv2.VideoCapture(0)
-    mph = MediapipeHands()
+    mph = MediapipeHands(max_num_hands=4)
+
+    mode = 1
     while cap.isOpened():
         ret, frame = cap.read()
         if ret is None:
             print('cannot read frame.')
 
+        key = cv2.waitKey(1)&0xFF
+        if key >= ord('0') and key <= ord('9'):
+            mode = key - ord('0')
+        
         frame = cv2.flip(frame, 1)
         hands = mph.detectHands(frame)
 
-        # print(hands.Left.getPoint(8))
-        # hands.Left.judgeOpen('thumb')
-        # hands.Right.judgeAll()
+        if mode == 1:
+            print(hands.Left.getPoint(1, 8))
+
+        elif mode == 2:
+            hands.Left.judgeOpen(finger_id='thumb')
+
+        elif mode == 3:
+            hands.Right.judgeAll()
 
         mph.drawHandAll(frame, hands)
-
         cv2.imshow('res', frame)
-        key = cv2.waitKey(1)&0xFF
 
         if key == ord('q'):
             break
@@ -334,5 +348,5 @@ def testFaceMesh():
 
 if __name__=='__main__':
     testHands()
-    testPose()
-    testFaceMesh()
+    # testPose()
+    # testFaceMesh()
