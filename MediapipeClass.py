@@ -348,5 +348,5 @@ def testFaceMesh():
 
 if __name__=='__main__':
     testHands()
-    # testPose()
-    # testFaceMesh()
+    testPose()
+    testFaceMesh()
